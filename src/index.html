@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mega Backup Tracker</title>
+
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+    
+    <!-- LordIcon -->
+    <script src="https://cdn.lordicon.com/lordicon.js"></script>
+
+    <!-- Estilos propios -->
+    <link rel="stylesheet" href="styles/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>
+                <i class="bi bi-cloud-check"></i>
+                Mega Backup Tracker
+            </h1>
+            <div id="connection-status">
+                <i class="bi bi-circle-fill"></i> Conectando...
+            </div>
+            <div class="header-actions">
+                <button id="btnABM" class="btn btn-primary">
+                    <i class="bi bi-people"></i> Gestionar Clientes
+                </button>
+                <button id="btnExport" class="btn btn-secondary">
+                    <i class="bi bi-download"></i> Exportar
+                </button>
+            </div>
+        </header>
+
+        <div class="control-panel">
+            <button id="btnAnalizar" class="btn">
+                <i class="bi bi-arrow-repeat"></i> Analizar Backups
+            </button>
+            <button id="btnAvisos" class="btn">
+                <i class="bi bi-envelope"></i> Enviar Avisos
+            </button>
+            <button id="btnExportar" class="btn">
+                <i class="bi bi-file-earmark-arrow-down"></i> Exportar CSV
+            </button>
+        </div>
+
+        <div class="status-panel">
+            <div id="output">Esperando...</div>
+        </div>
+
+        <div class="table-container">
+            <div class="table-header">
+                <h2>
+                    <i class="bi bi-cloud-check"></i>
+                    Estado de Backups
+                </h2>
+                <div class="table-actions">
+                    <input type="text" id="searchInput" placeholder="Buscar cliente..." class="search-input">
+                    <select id="filterStatus" class="search-input">
+                        <option value="all">Todos los estados</option>
+                        <option value="actualizado">Al día</option>
+                        <option value="desactualizado">Desactualizados</option>
+                        <option value="sin_backups">Sin backups</option>
+                    </select>
+                </div>
+            </div>
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th data-sort="cliente" class="sortable">
+                                Cliente <i class="bi bi-arrow-down-up"></i>
+                            </th>
+                            <th data-sort="archivo" class="sortable">
+                                Último Backup <i class="bi bi-arrow-down-up"></i>
+                            </th>
+                            <th data-sort="fecha_subida" class="sortable">
+                                Fecha <i class="bi bi-arrow-down-up"></i>
+                            </th>
+                            <th data-sort="estado" class="sortable">
+                                Estado <i class="bi bi-arrow-down-up"></i>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="tablaBackups">
+                        <!-- La tabla se llenará dinámicamente -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de exportación -->
+    <div id="exportModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Exportar Datos</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Selecciona las columnas a exportar:</p>
+                <div class="export-options">
+                    <label><input type="checkbox" value="cliente" checked> Cliente</label>
+                    <label><input type="checkbox" value="archivo" checked> Último Backup</label>
+                    <label><input type="checkbox" value="fecha_subida" checked> Fecha</label>
+                    <label><input type="checkbox" value="estado" checked> Estado</label>
+                </div>
+                <div class="export-filter mt-1">
+                    <label>
+                        <input type="checkbox" id="exportAll" checked>
+                        Exportar todos los backups (no solo los desactualizados)
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" id="btnCancelarExport">Cancelar</button>
+                <button class="btn btn-success" id="btnConfirmarExport">Exportar</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        
+        // Variables globales
+        let backupsData = [];
+        let currentSort = {
+            column: null,
+            direction: 'asc'
+        };
+        
+        // Elementos DOM
+        const btnAnalizar = document.getElementById('btnAnalizar');
+        const btnAvisos = document.getElementById('btnAvisos');
+        const btnExportar = document.getElementById('btnExportar');
+        const output = document.getElementById('output');
+        const tablaBackups = document.getElementById('tablaBackups');
+        const searchInput = document.getElementById('searchInput');
+        const filterStatus = document.getElementById('filterStatus');
+        const exportModal = document.getElementById('exportModal');
+        const btnCancelarExport = document.getElementById('btnCancelarExport');
+        const btnConfirmarExport = document.getElementById('btnConfirmarExport');
+        const btnABM = document.getElementById('btnABM');
+        
+        // Funciones de utilidad
+        function formatDate(dateString) {
+            if (!dateString) return 'Sin fecha';
+            try {
+                // Asegurarnos de que la fecha esté en formato ISO
+                const isoDate = new Date(dateString).toISOString();
+                const date = new Date(isoDate);
+                
+                // Si la fecha es válida, la formateamos
+                if (!isNaN(date.getTime())) {
+                    return date.toLocaleString('es-ES', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                }
+                
+                logger.error('Fecha inválida:', dateString);
+                return 'Error en fecha';
+            } catch (error) {
+                console.error('Error formateando fecha:', error, 'Fecha original:', dateString);
+                return 'Error en fecha';
+            }
+        }
+
+        function updateConnectionStatus(status) {
+            const statusElement = document.getElementById('connection-status');
+            switch(status) {
+                case 'connecting':
+                    statusElement.innerHTML = '<i class="bi bi-circle-fill" style="color: var(--warning-color)"></i> Conectando...';
+                    break;
+                case 'connected':
+                    statusElement.innerHTML = '<i class="bi bi-circle-fill" style="color: var(--success-color)"></i> Conectado';
+                    break;
+                case 'error':
+                    statusElement.innerHTML = '<i class="bi bi-circle-fill" style="color: var(--danger-color)"></i> Error de conexión';
+                    break;
+                default:
+                    statusElement.innerHTML = '<i class="bi bi-circle-fill" style="color: var(--warning-color)"></i> Desconectado';
+            }
+        }
+
+        function getStatusClass(backup) {
+            if (backup.archivo === 'SIN BACKUPS') return 'status-danger';
+            return backup.actualizado ? 'status-success' : 'status-warning';
+        }
+
+        function getStatusIcon(backup) {
+            if (backup.archivo === 'SIN BACKUPS') return '<i class="bi bi-x-circle"></i>';
+            return backup.actualizado ? 
+                '<i class="bi bi-check-circle"></i>' : 
+                '<i class="bi bi-exclamation-circle"></i>';
+        }
+
+        function getStatusText(backup) {
+            if (backup.archivo === 'SIN BACKUPS') return 'Sin backups';
+            return backup.actualizado ? 'Al día' : 'Desactualizado';
+        }
+
+        function exportToCSV(data, columns) {
+            // Preparar los datos con el estado calculado
+            const preparedData = data.map(backup => ({
+                ...backup,
+                estado: getStatusText(backup)
+            }));
+
+            const headers = columns.map(col => {
+                switch(col) {
+                    case 'cliente': return 'Cliente';
+                    case 'archivo': return 'Último Backup';
+                    case 'fecha_subida': return 'Fecha';
+                    case 'estado': return 'Estado';
+                    default: return col.charAt(0).toUpperCase() + col.slice(1);
+                }
+            }).join(',');
+
+            const rows = preparedData.map(row => 
+                columns.map(col => {
+                    let value = row[col] || '';
+                    // Formatear la fecha si es la columna fecha_subida
+                    if (col === 'fecha_subida') {
+                        value = formatDate(value);
+                    }
+                    // Si el valor contiene comas o comillas, lo envolvemos en comillas y escapamos las comillas internas
+                    return value.toString().includes(',') || value.toString().includes('"') 
+                        ? `"${value.toString().replace(/"/g, '""')}"` 
+                        : value;
+                }).join(',')
+            );
+            
+            const csv = [headers, ...rows].join('\n');
+            const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            
+            link.setAttribute('href', url);
+            link.setAttribute('download', `backups_${new Date().toISOString().split('T')[0]}.csv`);
+            link.style.visibility = 'hidden';
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function filterTable() {
+            const searchTerm = searchInput.value.toLowerCase();
+            const statusFilter = filterStatus.value;
+            const rows = tablaBackups.getElementsByTagName('tr');
+            
+            Array.from(rows).forEach(row => {
+                const text = row.textContent.toLowerCase();
+                const status = row.querySelector('td:last-child').textContent.toLowerCase();
+                
+                const matchesSearch = text.includes(searchTerm);
+                let matchesStatus = true;
+                
+                if (statusFilter !== 'all') {
+                    matchesStatus = status.includes(statusFilter);
+                }
+                
+                row.style.display = matchesSearch && matchesStatus ? '' : 'none';
+            });
+        }
+
+        function sortTable(column) {
+            const direction = column === currentSort.column && currentSort.direction === 'asc' ? 'desc' : 'asc';
+            
+            // Actualizar iconos
+            document.querySelectorAll('th.sortable i').forEach(icon => {
+                icon.className = 'bi bi-arrow-down-up';
+            });
+            const currentHeader = document.querySelector(`th[data-sort="${column}"]`);
+            const icon = currentHeader.querySelector('i');
+            icon.className = `bi bi-arrow-${direction === 'asc' ? 'up' : 'down'}`;
+            
+            // Ordenar datos
+            backupsData.sort((a, b) => {
+                let valueA, valueB;
+                
+                switch(column) {
+                    case 'cliente':
+                        valueA = a.cliente.toLowerCase();
+                        valueB = b.cliente.toLowerCase();
+                        break;
+                    case 'archivo':
+                        valueA = a.archivo.toLowerCase();
+                        valueB = b.archivo.toLowerCase();
+                        break;
+                    case 'fecha_subida':
+                        valueA = new Date(a.fecha_subida).getTime();
+                        valueB = new Date(b.fecha_subida).getTime();
+                        break;
+                    case 'estado':
+                        valueA = getStatusText(a).toLowerCase();
+                        valueB = getStatusText(b).toLowerCase();
+                        break;
+                    default:
+                        return 0;
+                }
+                
+                if (valueA < valueB) return direction === 'asc' ? -1 : 1;
+                if (valueA > valueB) return direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+            
+            currentSort = { column, direction };
+            renderTable();
+        }
+
+        function renderTable() {
+            tablaBackups.innerHTML = '';
+            
+            backupsData.forEach(backup => {
+                const row = document.createElement('tr');
+                const statusClass = getStatusClass(backup);
+                row.innerHTML = `
+                    <td>${backup.cliente}</td>
+                    <td>${backup.archivo}</td>
+                    <td>${formatDate(backup.fecha_subida)}</td>
+                    <td class="${statusClass}">
+                        ${getStatusIcon(backup)} ${getStatusText(backup)}
+                    </td>
+                `;
+                tablaBackups.appendChild(row);
+            });
+            
+            filterTable();
+        }
+
+        // Event Listeners
+        btnAnalizar.addEventListener('click', () => {
+            output.innerHTML = `
+                <span>
+                    <lord-icon
+                        src="https://cdn.lordicon.com/jpgpblwn.json"
+                        trigger="loop"
+                        colors="primary:#ffffff"
+                        style="width:30px;height:30px">
+                    </lord-icon>
+                    Procesando...
+                </span>
+            `;
+            output.className = 'status running';
+            btnAnalizar.disabled = true;
+            ipcRenderer.send('ejecutar-script', 'index.js');
+        });
+
+        btnAvisos.addEventListener('click', () => {
+            output.innerHTML = `
+                <span>
+                    <lord-icon
+                        src="https://cdn.lordicon.com/jpgpblwn.json"
+                        trigger="loop"
+                        colors="primary:#ffffff"
+                        style="width:30px;height:30px">
+                    </lord-icon>
+                    Enviando avisos...
+                </span>
+            `;
+            output.className = 'status running';
+            btnAvisos.disabled = true;
+            ipcRenderer.send('ejecutar-script', 'avisos.js');
+        });
+
+        btnExportar.addEventListener('click', () => {
+            exportModal.classList.add('active');
+        });
+
+        btnCancelarExport.addEventListener('click', () => {
+            exportModal.classList.remove('active');
+        });
+
+        btnConfirmarExport.addEventListener('click', async () => {
+            const selectedColumns = Array.from(
+                document.querySelectorAll('.export-options input:checked')
+            ).map(input => input.value);
+
+            const exportAll = document.getElementById('exportAll').checked;
+            
+            try {
+                // Si exportAll está marcado, obtener todos los backups
+                let dataToExport = exportAll ? 
+                    await ipcRenderer.invoke('get-all-backups') : 
+                    backupsData;
+                
+                exportToCSV(dataToExport, selectedColumns);
+                exportModal.classList.remove('active');
+            } catch (error) {
+                console.error('Error al exportar:', error);
+                alert('Error al exportar los datos');
+            }
+        });
+
+        btnABM.addEventListener('click', () => {
+            ipcRenderer.send('open-abm');
+        });
+
+        searchInput.addEventListener('input', filterTable);
+        filterStatus.addEventListener('change', filterTable);
+
+        // Event Listeners para ordenamiento
+        document.querySelectorAll('th.sortable').forEach(headerCell => {
+            headerCell.addEventListener('click', () => {
+                const column = headerCell.getAttribute('data-sort');
+                sortTable(column);
+            });
+        });
+
+        // IPC Listeners
+        ipcRenderer.on('update-output', (event, message) => {
+            output.textContent = message;
+            if (message.includes('✅')) {
+                output.className = 'status success';
+            } else if (message.includes('❌')) {
+                output.className = 'status error';
+            } else {
+                output.className = 'status running';
+            }
+            btnAnalizar.disabled = false;
+            btnAvisos.disabled = false;
+        });
+
+        ipcRenderer.on('mostrar-tabla', (event, data) => {
+            backupsData = data;
+            currentSort = { column: null, direction: 'asc' }; // Reset sort
+            renderTable();
+        });
+
+        // Inicialización
+        ipcRenderer.on('mega-status', (event, status) => {
+            updateConnectionStatus(status);
+        });
+
+        // Escuchar el estado de conexión
+        ipcRenderer.on('connection-status', (event, status) => {
+            updateConnectionStatus(status);
+        });
+    </script>
+
+</body>
+
+</html>

@@ -1,0 +1,31 @@
+{
+  "name": "mega-backup-tracker",
+  "version": "1.0.0",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint src/**/*.js",
+    "format": "prettier --write \"src/**/*.js\""
+  },
+  "keywords": [
+    "backup",
+    "mega",
+    "monitoring",
+    "electron"
+  ],
+  "author": "",
+  "license": "ISC",
+  "description": "Sistema de seguimiento y monitoreo de backups almacenados en MEGA",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "electron": "^34.2.0",
+    "megajs": "^1.3.5",
+    "nodemailer": "^6.10.0",
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5"
+  }
+}

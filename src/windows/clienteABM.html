@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gestión de Clientes</title>
+    <link href="../styles/main.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Gestión de Clientes</h1>
+            <button id="btnNuevo" class="btn btn-primary">
+                <i class="bi bi-plus-circle"></i> Nuevo Cliente
+            </button>
+        </div>
+
+        <div class="table-container">
+            <div class="table-header">
+                <h2>Lista de Clientes</h2>
+                <div class="table-actions">
+                    <input type="text" id="searchInput" class="search-input" placeholder="Buscar clientes...">
+                </div>
+            </div>
+            <div class="table-scroll">
+                <table id="clientesTable">
+                    <thead>
+                        <tr>
+                            <th>ID Cliente</th>
+                            <th>Nombre</th>
+                            <th>Email</th>
+                            <th>AnyDesk ID</th>
+                            <th>Frec. Backup</th>
+                            <th>Estado</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="clientesTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Modal para Crear/Editar Cliente -->
+        <div id="clienteModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="modalTitle">Nuevo Cliente</h2>
+                    <span class="close">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <form id="clienteForm">
+                        <div class="form-group">
+                            <label for="id_cliente">ID Cliente:</label>
+                            <input type="text" id="id_cliente" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="nombre">Nombre:</label>
+                            <input type="text" id="nombre" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="email">Email:</label>
+                            <input type="email" id="email">
+                        </div>
+                        <div class="form-group">
+                            <label for="anydesk_id">AnyDesk ID:</label>
+                            <input type="text" id="anydesk_id">
+                        </div>
+                        <div class="form-group">
+                            <label for="anydesk_pass">AnyDesk Password:</label>
+                            <div class="password-input-group">
+                                <input type="password" id="anydesk_pass">
+                                <button type="button" class="btn btn-icon" id="togglePassword">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="frecuencia_backup">Frecuencia de Backup (días):</label>
+                            <input type="number" id="frecuencia_backup" value="30" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="notificar_email" checked>
+                                Notificar por Email
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="emails_adicionales">Emails Adicionales:</label>
+                            <input type="text" id="emails_adicionales" placeholder="email1@ejemplo.com, email2@ejemplo.com">
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="ignorar">
+                                Ignorar Cliente
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="notas">Notas:</label>
+                            <textarea id="notas" rows="3"></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btnCancelar">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btnGuardar">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        // Variables globales
+        let editingId = null;
+        const modal = document.getElementById('clienteModal');
+        const form = document.getElementById('clienteForm');
+        const searchInput = document.getElementById('searchInput');
+        const togglePasswordBtn = document.getElementById('togglePassword');
+        const anydeskPassInput = document.getElementById('anydesk_pass');
+
+        // Event Listeners
+        document.getElementById('btnNuevo').addEventListener('click', () => showModal());
+        document.querySelector('.close').addEventListener('click', () => hideModal());
+        document.getElementById('btnCancelar').addEventListener('click', () => hideModal());
+        document.getElementById('btnGuardar').addEventListener('click', saveCliente);
+        searchInput.addEventListener('input', filterClientes);
+        togglePasswordBtn.addEventListener('click', togglePasswordVisibility);
+
+        // Función para mostrar/ocultar contraseña
+        function togglePasswordVisibility() {
+            const type = anydeskPassInput.getAttribute('type') === 'password' ? 'text' : 'password';
+            anydeskPassInput.setAttribute('type', type);
+            togglePasswordBtn.querySelector('i').className = type === 'password' ? 'bi bi-eye' : 'bi bi-eye-slash';
+        }
+
+        // Cargar clientes al iniciar
+        loadClientes();
+
+        // Funciones
+        function showModal(cliente = null) {
+            editingId = cliente ? cliente.id_cliente : null;
+            document.getElementById('modalTitle').textContent = cliente ? 'Editar Cliente' : 'Nuevo Cliente';
+            
+            if (cliente) {
+                Object.keys(cliente).forEach(key => {
+                    const element = document.getElementById(key);
+                    if (element) {
+                        if (element.type === 'checkbox') {
+                            element.checked = cliente[key] === 1;
+                        } else {
+                            element.value = cliente[key] || '';
+                        }
+                    }
+                });
+                document.getElementById('id_cliente').disabled = true;
+            } else {
+                form.reset();
+                document.getElementById('id_cliente').disabled = false;
+            }
+            
+            modal.style.display = 'block';
+        }
+
+        function hideModal() {
+            modal.style.display = 'none';
+            form.reset();
+            editingId = null;
+        }
+
+        async function loadClientes() {
+            try {
+                const clientes = await ipcRenderer.invoke('get-clientes');
+                renderClientes(clientes);
+            } catch (error) {
+                console.error('Error cargando clientes:', error);
+                alert('Error al cargar los clientes');
+            }
+        }
+
+        function renderClientes(clientes) {
+            const tbody = document.getElementById('clientesTableBody');
+            tbody.innerHTML = '';
+
+            clientes.forEach(cliente => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${cliente.id_cliente}</td>
+                    <td>${cliente.nombre}</td>
+                    <td>${cliente.email || ''}</td>
+                    <td>${cliente.anydesk_id || ''}</td>
+                    <td>${cliente.frecuencia_backup} días</td>
+                    <td>
+                        <span class="badge ${cliente.ignorar ? 'badge-warning' : 'badge-success'}">
+                            ${cliente.ignorar ? 'Ignorado' : 'Activo'}
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-edit" onclick="editCliente('${cliente.id_cliente}')">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-delete" onclick="deleteCliente('${cliente.id_cliente}')">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function saveCliente() {
+            const clienteData = {
+                id_cliente: document.getElementById('id_cliente').value,
+                nombre: document.getElementById('nombre').value,
+                email: document.getElementById('email').value,
+                anydesk_id: document.getElementById('anydesk_id').value,
+                anydesk_pass: document.getElementById('anydesk_pass').value,
+                ignorar: document.getElementById('ignorar').checked ? 1 : 0,
+                frecuencia_backup: parseInt(document.getElementById('frecuencia_backup').value),
+                notificar_email: document.getElementById('notificar_email').checked ? 1 : 0,
+                emails_adicionales: document.getElementById('emails_adicionales').value,
+                notas: document.getElementById('notas').value
+            };
+
+            try {
+                if (editingId) {
+                    await ipcRenderer.invoke('update-cliente', editingId, clienteData);
+                } else {
+                    await ipcRenderer.invoke('create-cliente', clienteData);
+                }
+                hideModal();
+                loadClientes();
+            } catch (error) {
+                console.error('Error guardando cliente:', error);
+                alert('Error al guardar el cliente');
+            }
+        }
+
+        async function editCliente(id) {
+            try {
+                const cliente = await ipcRenderer.invoke('get-cliente', id);
+                showModal(cliente);
+            } catch (error) {
+                console.error('Error cargando cliente:', error);
+                alert('Error al cargar los datos del cliente');
+            }
+        }
+
+        async function deleteCliente(id) {
+            if (confirm('¿Está seguro de que desea eliminar este cliente?')) {
+                try {
+                    await ipcRenderer.invoke('delete-cliente', id);
+                    loadClientes();
+                } catch (error) {
+                    console.error('Error eliminando cliente:', error);
+                    alert('Error al eliminar el cliente');
+                }
+            }
+        }
+
+        function filterClientes() {
+            const searchTerm = searchInput.value.toLowerCase();
+            const rows = document.querySelectorAll('#clientesTableBody tr');
+            
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(searchTerm) ? '' : 'none';
+            });
+        }
+    </script>
+</body>
+</html> 
