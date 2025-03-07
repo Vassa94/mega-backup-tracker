@@ -43,3 +43,4 @@ old/
 logs/backups.log
 logs/dev.log
 backups.db
+init.cmd
